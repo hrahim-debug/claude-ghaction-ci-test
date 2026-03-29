@@ -1,0 +1,135 @@
+# ==========================================================================
+# GitHub Actions: Deploy Angular App to GitHub Pages
+# ==========================================================================
+# Trigger: Push to main branch
+# Steps: Build Angular -> Validate with Claude -> Deploy to Pages
+#
+# Prerequisites:
+#   1. GitHub Pages enabled with source set to "GitHub Actions"
+#   2. ANTHROPIC_API_KEY secret configured
+#   3. Angular app with package.json and angular.json
+# ==========================================================================
+
+name: Deploy to GitHub Pages
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'src/**'
+      - 'angular.json'
+      - 'package.json'
+      - '.github/workflows/deploy-pages.yml'
+
+  # Allow manual trigger from Actions tab
+  workflow_dispatch:
+
+# Required permissions for GitHub Pages deployment
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+# Only allow one deployment at a time
+concurrency:
+  group: "pages"
+  cancel-in-progress: false
+
+jobs:
+  # -------------------------------------------------------------------
+  # Job 1: Build Angular app & validate with Claude
+  # -------------------------------------------------------------------
+  build:
+    name: Build & Validate
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "npm"
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build Angular app
+        run: npx ng build --base-href /claude-ghaction-ci-test/
+
+      - name: Install Claude Code CLI
+        run: |
+          npm install -g @anthropic-ai/claude-code
+          claude --version
+
+      - name: Validate build output with Claude
+        run: |
+          PROMPT=$(cat prompts/validate-html.md)
+          HTML_CONTENT=$(cat dist/claude-ghaction-ci-test/browser/index.html)
+
+          claude -p \
+            --output-format text \
+            --max-turns 1 \
+            "$PROMPT
+
+          ## HTML to Validate:
+          \`\`\`html
+          $HTML_CONTENT
+          \`\`\`" > validation-report.md 2>&1
+
+          echo "=== Validation Report ==="
+          cat validation-report.md
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+
+      - name: Upload validation report
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: validation-report
+          path: validation-report.md
+          retention-days: 30
+
+  # -------------------------------------------------------------------
+  # Job 2: Deploy to GitHub Pages
+  # -------------------------------------------------------------------
+  deploy:
+    name: Deploy to GitHub Pages
+    needs: build
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "npm"
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build Angular app
+        run: npx ng build --base-href /claude-ghaction-ci-test/
+
+      - name: Configure GitHub Pages
+        uses: actions/configure-pages@v5
+
+      - name: Upload Pages artifact
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: 'dist/claude-ghaction-ci-test/browser'
+
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4
