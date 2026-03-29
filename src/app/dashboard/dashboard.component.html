@@ -1,0 +1,22 @@
+<!-- SECURITY: Using innerHTML with unsanitized data -->
+<div [innerHTML]="welcomeHtml"></div>
+
+<!-- DESIGN: Complex logic in template -->
+<div *ngIf="userData">
+  <div *ngFor="let n of notifications">
+    <span [style.color]="getStatusColor(n.status)">
+      {{ n.message }}
+    </span>
+    <!-- BUG: Using == in template, index tracking missing -->
+    <button (click)="deleteNotification(n.id)">
+      Dismiss
+    </button>
+  </div>
+</div>
+
+<div *ngIf="errorMessage">
+  <!-- SECURITY: Directly rendering error message (could contain user input) -->
+  <p [innerHTML]="errorMessage"></p>
+</div>
+
+<button (click)="exportData()">Export</button>
