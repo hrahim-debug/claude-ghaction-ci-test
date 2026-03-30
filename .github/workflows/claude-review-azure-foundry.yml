@@ -1,0 +1,279 @@
+# ==========================================================================
+# GitHub Actions: Claude Code PR Review via Azure AI Foundry
+# ==========================================================================
+# Authentication: Anthropic API key issued through Azure AI Foundry
+#
+# How Azure AI Foundry auth works:
+#   Claude Code CLI supports Azure AI Foundry as a proxy. Instead of
+#   calling api.anthropic.com directly, requests are routed through your
+#   Azure AI Foundry endpoint. You use the Azure-issued API key (not an
+#   Anthropic API key) and set the base URL to your Foundry endpoint.
+#
+# Prerequisites:
+#   1. Azure AI Foundry resource with Claude model deployed
+#   2. Repository secrets (Settings > Secrets and variables > Actions):
+#      - AZURE_FOUNDRY_API_KEY   : API key from Azure AI Foundry
+#      - AZURE_FOUNDRY_BASE_URL  : Your Foundry endpoint URL
+#        Format: https://<resource>.services.ai.azure.com/api/v1
+#        (derived from your project endpoint, appending /api/v1)
+#   3. Prompt files in prompts/ directory
+#
+# How to get your Azure AI Foundry credentials:
+#   1. Go to Azure AI Foundry portal (ai.azure.com)
+#   2. Open your project > Settings > Keys and Endpoint
+#   3. Copy the API key -> store as AZURE_FOUNDRY_API_KEY secret
+#   4. Copy the endpoint URL -> store as AZURE_FOUNDRY_BASE_URL secret
+#      e.g. https://<resource>.services.ai.azure.com/api/v1
+# ==========================================================================
+
+name: Claude Code PR Review (Azure Foundry)
+
+on:
+  pull_request:
+    branches: [main, develop]
+    types: [opened, synchronize, reopened]
+
+  # Allow manual trigger for testing the Azure Foundry connection
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pull-requests: write
+
+env:
+  NODE_VERSION: "20"
+  REPORT_DIR: "claude-review-output"
+  # Map Azure Foundry secrets to the env vars Claude Code CLI expects
+  ANTHROPIC_API_KEY: ${{ secrets.AZURE_FOUNDRY_API_KEY }}
+  ANTHROPIC_BASE_URL: ${{ secrets.AZURE_FOUNDRY_BASE_URL }}
+
+jobs:
+  claude-review:
+    name: Claude Code PR Review (Azure Foundry)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      # ---------------------------------------------------------------
+      # Step 1: Checkout repository with full git history
+      # ---------------------------------------------------------------
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      # ---------------------------------------------------------------
+      # Step 2: Install Node.js (required for Claude Code CLI)
+      # ---------------------------------------------------------------
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+
+      # ---------------------------------------------------------------
+      # Step 3: Install Claude Code CLI
+      # ---------------------------------------------------------------
+      - name: Install Claude Code CLI
+        run: |
+          npm install -g @anthropic-ai/claude-code
+          claude --version
+
+      # ---------------------------------------------------------------
+      # Step 4: Validate Azure Foundry connection
+      # ---------------------------------------------------------------
+      - name: Validate Azure Foundry connection
+        run: |
+          if [ -z "$ANTHROPIC_API_KEY" ]; then
+            echo "::error::AZURE_FOUNDRY_API_KEY secret is not set. Go to repo Settings > Secrets > Actions to add it."
+            exit 1
+          fi
+          if [ -z "$ANTHROPIC_BASE_URL" ]; then
+            echo "::error::AZURE_FOUNDRY_BASE_URL secret is not set. Go to repo Settings > Secrets > Actions to add it."
+            exit 1
+          fi
+          echo "Azure Foundry endpoint configured: ${ANTHROPIC_BASE_URL:0:50}..."
+          echo "Testing connection with a minimal prompt..."
+          claude -p --output-format text --max-turns 1 "Reply with only: CONNECTION OK" || {
+            echo "::error::Failed to connect to Azure AI Foundry. Verify your API key and endpoint URL."
+            exit 1
+          }
+          echo "Azure AI Foundry connection validated successfully."
+
+      # ---------------------------------------------------------------
+      # Step 5: Create report directory
+      # ---------------------------------------------------------------
+      - name: Create report directory
+        run: mkdir -p "$REPORT_DIR"
+
+      # ---------------------------------------------------------------
+      # Step 6: Get PR diff (skipped on workflow_dispatch)
+      # ---------------------------------------------------------------
+      - name: Get PR diff
+        if: github.event_name == 'pull_request'
+        run: |
+          git fetch origin ${{ github.base_ref }}
+          TARGET="origin/${{ github.base_ref }}"
+          git diff "$TARGET"...HEAD > "$REPORT_DIR/pr-diff.txt"
+          git diff --name-only "$TARGET"...HEAD > "$REPORT_DIR/changed-files.txt"
+          echo "### Changed files:"
+          cat "$REPORT_DIR/changed-files.txt"
+          echo "### Diff size:"
+          wc -l "$REPORT_DIR/pr-diff.txt"
+
+      # ---------------------------------------------------------------
+      # Step 7: Claude - Security Scan
+      # ---------------------------------------------------------------
+      - name: Claude - Security Scan
+        if: github.event_name == 'pull_request'
+        run: |
+          PROMPT=$(cat prompts/code-scan.md)
+          DIFF=$(cat "$REPORT_DIR/pr-diff.txt")
+          claude -p \
+            --output-format text \
+            --max-turns 1 \
+            "$PROMPT
+
+          ## Code Diff to Analyze:
+          \`\`\`diff
+          $DIFF
+          \`\`\`" > "$REPORT_DIR/scan-results.md" 2>&1
+          echo "=== Security Scan Complete ==="
+
+      # ---------------------------------------------------------------
+      # Step 8: Claude - PR Review
+      # ---------------------------------------------------------------
+      - name: Claude - PR Review
+        if: github.event_name == 'pull_request'
+        run: |
+          PROMPT=$(cat prompts/pr-review.md)
+          DIFF=$(cat "$REPORT_DIR/pr-diff.txt")
+          claude -p \
+            --output-format text \
+            --max-turns 1 \
+            "$PROMPT
+
+          ## Code Diff to Review:
+          \`\`\`diff
+          $DIFF
+          \`\`\`" > "$REPORT_DIR/review-results.md" 2>&1
+          echo "=== PR Review Complete ==="
+
+      # ---------------------------------------------------------------
+      # Step 9: Claude - Code Suggestions
+      # ---------------------------------------------------------------
+      - name: Claude - Code Suggestions
+        if: github.event_name == 'pull_request'
+        run: |
+          PROMPT=$(cat prompts/code-suggestions.md)
+          DIFF=$(cat "$REPORT_DIR/pr-diff.txt")
+          claude -p \
+            --output-format text \
+            --max-turns 1 \
+            "$PROMPT
+
+          ## Code Diff to Analyze:
+          \`\`\`diff
+          $DIFF
+          \`\`\`" > "$REPORT_DIR/suggestions-results.md" 2>&1
+          echo "=== Code Suggestions Complete ==="
+
+      # ---------------------------------------------------------------
+      # Step 10: Claude - Bug Detection
+      # ---------------------------------------------------------------
+      - name: Claude - Bug Detection
+        if: github.event_name == 'pull_request'
+        run: |
+          PROMPT=$(cat prompts/code-fix.md)
+          DIFF=$(cat "$REPORT_DIR/pr-diff.txt")
+          claude -p \
+            --output-format text \
+            --max-turns 1 \
+            "$PROMPT
+
+          ## Code Diff to Analyze:
+          \`\`\`diff
+          $DIFF
+          \`\`\`" > "$REPORT_DIR/fix-results.md" 2>&1
+          echo "=== Bug Detection Complete ==="
+
+      # ---------------------------------------------------------------
+      # Step 11: Post combined results as PR comment
+      # ---------------------------------------------------------------
+      - name: Post review to PR
+        if: github.event_name == 'pull_request'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+            const dir = process.env.REPORT_DIR;
+
+            const read = (f) => {
+              try { return fs.readFileSync(`${dir}/${f}`, 'utf8').trim(); }
+              catch { return '_No results generated._'; }
+            };
+
+            const scan = read('scan-results.md');
+            const review = read('review-results.md');
+            const suggestions = read('suggestions-results.md');
+            const fixes = read('fix-results.md');
+            const changedFiles = read('changed-files.txt');
+
+            const body = [
+              '## Claude Code Review Report (via Azure AI Foundry)',
+              '',
+              `**PR:** #${context.issue.number}`,
+              `**Run:** [View workflow run](${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId})`,
+              `**Auth:** Azure AI Foundry`,
+              `**Changed files:**`,
+              '```',
+              changedFiles,
+              '```',
+              '',
+              '---',
+              '',
+              '### Security Scan',
+              '',
+              scan,
+              '',
+              '---',
+              '',
+              '### Code Review',
+              '',
+              review,
+              '',
+              '---',
+              '',
+              '### Code Suggestions',
+              '',
+              suggestions,
+              '',
+              '---',
+              '',
+              '### Bug Detection & Fix Suggestions',
+              '',
+              fixes,
+              '',
+              '---',
+              '',
+              '*Generated by Claude Code CLI via Azure AI Foundry in GitHub Actions*'
+            ].join('\n');
+
+            await github.rest.issues.createComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.issue.number,
+              body: body
+            });
+
+            console.log('PR comment posted successfully');
+
+      # ---------------------------------------------------------------
+      # Step 12: Upload review artifacts
+      # ---------------------------------------------------------------
+      - name: Upload review artifacts
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: claude-review-report-azure-foundry
+          path: ${{ env.REPORT_DIR }}/
+          retention-days: 30
