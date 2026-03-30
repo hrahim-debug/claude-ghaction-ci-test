@@ -86,6 +86,7 @@ jobs:
           CLAUDE_CODE_USE_FOUNDRY: "1"
           ANTHROPIC_FOUNDRY_BASE_URL: ${{ secrets.ANTHROPIC_FOUNDRY_BASE_URL }}
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          NODE_TLS_REJECT_UNAUTHORIZED: "0"
 
       - name: Upload validation report
         uses: actions/upload-artifact@v4

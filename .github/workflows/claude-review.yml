@@ -28,6 +28,8 @@ env:
   CLAUDE_CODE_USE_FOUNDRY: "1"
   ANTHROPIC_FOUNDRY_BASE_URL: ${{ secrets.ANTHROPIC_FOUNDRY_BASE_URL }}
   ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+  # Required for Azure AI Foundry endpoints with corporate/internal TLS certificates
+  NODE_TLS_REJECT_UNAUTHORIZED: "0"
 
 jobs:
   claude-review:
