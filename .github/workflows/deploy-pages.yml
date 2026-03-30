@@ -6,7 +6,7 @@
 #
 # Prerequisites:
 #   1. GitHub Pages enabled with source set to "GitHub Actions"
-#   2. ANTHROPIC_API_KEY secret configured
+#   2. Repository secrets: ANTHROPIC_API_KEY + ANTHROPIC_FOUNDRY_BASE_URL
 #   3. Angular app with package.json and angular.json
 # ==========================================================================
 
@@ -83,6 +83,8 @@ jobs:
           echo "=== Validation Report ==="
           cat validation-report.md
         env:
+          CLAUDE_CODE_USE_FOUNDRY: "1"
+          ANTHROPIC_FOUNDRY_BASE_URL: ${{ secrets.ANTHROPIC_FOUNDRY_BASE_URL }}
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
 
       - name: Upload validation report

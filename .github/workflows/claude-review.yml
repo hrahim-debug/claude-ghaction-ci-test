@@ -1,10 +1,12 @@
 # ==========================================================================
 # GitHub Actions: Claude Code PR Review & Code Scanning
 # ==========================================================================
-# Authentication: Direct Anthropic API key (no Azure/Foundry required)
+# Authentication: Azure AI Foundry
 #
 # Prerequisites:
-#   1. Anthropic API key stored as repository secret: ANTHROPIC_API_KEY
+#   1. Repository secrets (Settings > Secrets and variables > Actions > Secrets):
+#      - ANTHROPIC_API_KEY           (API key from Azure AI Foundry)
+#      - ANTHROPIC_FOUNDRY_BASE_URL  (e.g. https://<resource>.services.ai.azure.com/anthropic/)
 #   2. Prompt files in prompts/ directory
 # ==========================================================================
 
@@ -22,6 +24,10 @@ permissions:
 env:
   NODE_VERSION: "20"
   REPORT_DIR: "claude-review-output"
+  # Azure AI Foundry authentication
+  CLAUDE_CODE_USE_FOUNDRY: "1"
+  ANTHROPIC_FOUNDRY_BASE_URL: ${{ secrets.ANTHROPIC_FOUNDRY_BASE_URL }}
+  ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
 
 jobs:
   claude-review:
@@ -91,8 +97,6 @@ jobs:
           $DIFF
           \`\`\`" > "$REPORT_DIR/scan-results.md" 2>&1
           echo "=== Security Scan Complete ==="
-        env:
-          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
 
       # ---------------------------------------------------------------
       # Step 7: Claude - PR Review
@@ -111,8 +115,6 @@ jobs:
           $DIFF
           \`\`\`" > "$REPORT_DIR/review-results.md" 2>&1
           echo "=== PR Review Complete ==="
-        env:
-          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
 
       # ---------------------------------------------------------------
       # Step 8: Claude - Code Suggestions
@@ -131,8 +133,6 @@ jobs:
           $DIFF
           \`\`\`" > "$REPORT_DIR/suggestions-results.md" 2>&1
           echo "=== Code Suggestions Complete ==="
-        env:
-          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
 
       # ---------------------------------------------------------------
       # Step 9: Claude - Bug Detection
@@ -151,8 +151,6 @@ jobs:
           $DIFF
           \`\`\`" > "$REPORT_DIR/fix-results.md" 2>&1
           echo "=== Bug Detection Complete ==="
-        env:
-          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
 
       # ---------------------------------------------------------------
       # Step 10: Post combined results as PR comment
