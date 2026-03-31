@@ -28,3 +28,10 @@ For each finding, report:
 - **Recommendation**: how to fix it
 
 If no issues are found, state: "No security issues detected in this diff."
+
+## Verdict
+
+At the very end of your response, you MUST output exactly one of these lines:
+
+- `VERDICT: FAIL` — if any Critical or High severity issues were found
+- `VERDICT: PASS` — if no Critical or High severity issues were found (Medium/Low only, or clean)

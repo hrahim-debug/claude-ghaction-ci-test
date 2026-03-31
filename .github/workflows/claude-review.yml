@@ -1,10 +1,11 @@
 # ==========================================================================
 # GitHub Actions: Claude Code PR Review & Code Scanning
 # ==========================================================================
-# Authentication: Direct Anthropic API key (no Azure/Foundry required)
+# Authentication: Anthropic API Key
 #
 # Prerequisites:
-#   1. Anthropic API key stored as repository secret: ANTHROPIC_API_KEY
+#   1. Repository secrets (Settings > Secrets and variables > Actions > Secrets):
+#      - ANTHROPIC_API_KEY  (Anthropic API key)
 #   2. Prompt files in prompts/ directory
 # ==========================================================================
 
@@ -22,6 +23,7 @@ permissions:
 env:
   NODE_VERSION: "20"
   REPORT_DIR: "claude-review-output"
+  ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
 
 jobs:
   claude-review:
@@ -91,8 +93,6 @@ jobs:
           $DIFF
           \`\`\`" > "$REPORT_DIR/scan-results.md" 2>&1
           echo "=== Security Scan Complete ==="
-        env:
-          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
 
       # ---------------------------------------------------------------
       # Step 7: Claude - PR Review
@@ -111,8 +111,6 @@ jobs:
           $DIFF
           \`\`\`" > "$REPORT_DIR/review-results.md" 2>&1
           echo "=== PR Review Complete ==="
-        env:
-          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
 
       # ---------------------------------------------------------------
       # Step 8: Claude - Code Suggestions
@@ -131,8 +129,6 @@ jobs:
           $DIFF
           \`\`\`" > "$REPORT_DIR/suggestions-results.md" 2>&1
           echo "=== Code Suggestions Complete ==="
-        env:
-          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
 
       # ---------------------------------------------------------------
       # Step 9: Claude - Bug Detection
@@ -151,13 +147,27 @@ jobs:
           $DIFF
           \`\`\`" > "$REPORT_DIR/fix-results.md" 2>&1
           echo "=== Bug Detection Complete ==="
-        env:
-          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
 
       # ---------------------------------------------------------------
-      # Step 10: Post combined results as PR comment
+      # Step 10: Check security scan verdict
+      # ---------------------------------------------------------------
+      - name: Check security scan verdict
+        id: security-gate
+        run: |
+          SCAN_RESULT=$(cat "$REPORT_DIR/scan-results.md")
+          if echo "$SCAN_RESULT" | grep -qi "VERDICT: FAIL"; then
+            echo "security_failed=true" >> "$GITHUB_OUTPUT"
+            echo "::warning::Security scan found Critical or High severity vulnerabilities."
+          else
+            echo "security_failed=false" >> "$GITHUB_OUTPUT"
+            echo "Security scan passed - no Critical/High issues found."
+          fi
+
+      # ---------------------------------------------------------------
+      # Step 11: Post combined results as PR comment
       # ---------------------------------------------------------------
       - name: Post review to PR
+        if: always()
         uses: actions/github-script@v7
         with:
           script: |
@@ -175,8 +185,15 @@ jobs:
             const fixes = read('fix-results.md');
             const changedFiles = read('changed-files.txt');
 
+            const securityFailed = '${{ steps.security-gate.outputs.security_failed }}' === 'true';
+            const statusBadge = securityFailed
+              ? '> **🚫 BLOCKED — Critical/High security vulnerabilities detected. This PR should not be merged until issues are resolved.**'
+              : '> **✅ PASSED — No Critical/High security vulnerabilities detected.**';
+
             const body = [
               '## 🤖 Claude Code Review Report',
+              '',
+              statusBadge,
               '',
               `**PR:** #${context.issue.number}`,
               `**Run:** [View workflow run](${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId})`,
@@ -224,7 +241,7 @@ jobs:
             console.log('PR comment posted successfully');
 
       # ---------------------------------------------------------------
-      # Step 11: Upload review artifacts
+      # Step 12: Upload review artifacts
       # ---------------------------------------------------------------
       - name: Upload review artifacts
         uses: actions/upload-artifact@v4
@@ -233,3 +250,13 @@ jobs:
           name: claude-review-report
           path: ${{ env.REPORT_DIR }}/
           retention-days: 30
+
+      # ---------------------------------------------------------------
+      # Step 13: Fail workflow if security vulnerabilities found
+      # ---------------------------------------------------------------
+      - name: Gate - Block merge on security failures
+        if: steps.security-gate.outputs.security_failed == 'true'
+        run: |
+          echo "::error::Security scan found Critical or High severity vulnerabilities. PR merge is blocked."
+          echo "Review the security scan results above and fix all Critical/High issues before merging."
+          exit 1

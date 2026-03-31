@@ -6,7 +6,8 @@
 #
 # Prerequisites:
 #   1. GitHub Pages enabled with source set to "GitHub Actions"
-#   2. ANTHROPIC_API_KEY secret configured
+#   2. Repository secrets:
+#      - ANTHROPIC_API_KEY  (Anthropic API key)
 #   3. Angular app with package.json and angular.json
 # ==========================================================================
 
@@ -78,10 +79,9 @@ jobs:
           ## HTML to Validate:
           \`\`\`html
           $HTML_CONTENT
-          \`\`\`" > validation-report.md 2>&1
+          \`\`\`" 2>&1 | tee validation-report.md
 
-          echo "=== Validation Report ==="
-          cat validation-report.md
+          echo "=== Validation Report Complete ==="
         env:
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
 
